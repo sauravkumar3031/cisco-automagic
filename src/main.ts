@@ -139,8 +139,7 @@ export class CiscoBot {
 
     private async completeSection(section: Locator) {
         if (await ExamHelper.isExamSection(section)) {
-            const examDoer = new ExamHelper(this, section);
-            await examDoer.doExam();
+            await new ExamHelper(this, section).doExam();
             return;
         }
 

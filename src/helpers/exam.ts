@@ -1,6 +1,9 @@
 import type { Locator } from "@playwright/test";
 import { sleep } from "bun";
-import type { CiscoBot } from "../main";
+import type { ActivityHelper } from "~/helpers/activity";
+import type { BotUtilities } from "~/helpers/bot-utils";
+import { click, forceClick, jsClick } from "~/helpers/misc";
+import type { CiscoBot } from "~/main";
 import {
     type AnswerObj,
     type BruteForceResetFn,
@@ -8,11 +11,10 @@ import {
     type NextQues_Response,
     type QuestionComponentResponse,
     QuestionType,
-} from "../types";
-import { combinations } from "../utils";
-import { waitForUserIntervention } from "../utils/prompt";
-import type { BotUtilities } from "./bot-utils";
-import { click, forceClick, jsClick } from "./misc";
+} from "~/types";
+import { combinations } from "~/utils";
+import { waitForUserIntervention } from "~/utils/prompt";
+import { MatchingActivity_Helper } from "./activity/matching-assessment";
 
 const ANSWERS = new Map<string, AnswerObj>();
 let listeningForAnswers = false;
@@ -186,7 +188,7 @@ export class ExamHelper {
                 return new ObjectMatch_Helper(question);
 
             case QuestionType.DROPDOWN_MATCH:
-                return new MatchingActivity_Helper(question);
+                return new MatchingActivity_Helper(null, question);
 
             default:
                 return null;
@@ -446,13 +448,18 @@ class QuestionHelperBase {
 
 export class MCQ_Helper extends QuestionHelperBase {
     private get optionLocator() {
-        return this.question.locator("div.mcq__widget .mcq__item");
+        return this.question
+            .locator("div.mcq__widget .mcq__item")
+            .or(this.question.locator("div.gmcq__widget .gmcq__item"));
     }
     private get options() {
         return this.optionLocator.all();
     }
     private get correctOptions() {
-        return this.question.locator("div.mcq__widget .mcq__item.is-correct").all();
+        return this.question
+            .locator("div.mcq__widget .mcq__item.is-correct")
+            .or(this.question.locator("div.gmcq__widget .gmcq__item.is-correct"))
+            .all();
     }
 
     private async getOptionIdentifier(option: Locator) {
@@ -716,156 +723,5 @@ export class ObjectMatch_Helper extends QuestionHelperBase {
         return await testFn();
         // no need to reset, cause we can't brute force it anyway
         // if the justAnswerIt() fails, we can't do anything about it
-    }
-}
-
-export class MatchingActivity_Helper extends QuestionHelperBase {
-    private get matchingQuestions() {
-        return this.question.locator("matching-dropdown-view, .matching__item").all();
-    }
-
-    private getDropdownButton(dropdown: Locator) {
-        return dropdown.locator("button.dropdown__btn");
-    }
-    private dropdownOptions(dropdown: Locator) {
-        return dropdown.locator("ul.dropdown__list li.dropdown__item");
-    }
-    private get feedbackTable() {
-        return this.question.locator(".table-feedback");
-    }
-
-    private async getOptionId(option: Locator) {
-        const text = await option.textContent();
-        if (text) return text.trim().toLowerCase();
-
-        return null;
-    }
-
-    private async selectOption(matchQuestion: Locator, answer: string) {
-        if (!answer) return;
-
-        const options = await this.dropdownOptions(matchQuestion).all();
-        for (const opt of options) {
-            const optId = await this.getOptionId(opt);
-
-            if (optId === answer) {
-                await jsClick(opt);
-                break;
-            }
-        }
-    }
-
-    async answer(answerObj: AnswerObj) {
-        if (answerObj.type !== QuestionType.DROPDOWN_MATCH) {
-            throw new Error(`Invalid answer type for DropDownMatch_Helper: ${answerObj.type}`);
-        }
-
-        const questions = await this.matchingQuestions;
-
-        for (const [index, dropdown] of questions.entries()) {
-            const correctOptionId = answerObj.answer.get(index.toString());
-            if (!correctOptionId) continue;
-
-            await this.selectOption(dropdown, correctOptionId);
-        }
-    }
-
-    private async extractAnswerFromSelectedOptions(): Promise<Map<string, string>> {
-        const answers = new Map<string, string>();
-
-        const matchItems = await this.matchingQuestions;
-        for (const [index, matchQuestion] of matchItems.entries()) {
-            const correctAns = await this.getDropdownButton(matchQuestion)
-                .locator("div.dropdown__inner")
-                .textContent();
-            if (!correctAns) continue;
-
-            answers.set(index.toString(), correctAns.trim().toLowerCase());
-        }
-
-        return answers;
-    }
-
-    private async extractAnswerFromFeedbackTable(): Promise<Map<string, string>> {
-        const answersMap = new Map<string, string>();
-        const correctAnswers: string[] = [];
-
-        for (const option of await this.feedbackTable.locator("tr th").all()) {
-            const text = await this.getOptionId(option);
-            if (text) correctAnswers.push(text);
-        }
-
-        const matchQuestionsText: string[] = [];
-        for (const matchQuestion of await this.matchingQuestions) {
-            const text = (await this.getDropdownButton(matchQuestion).textContent())
-                ?.trim()
-                ?.toLowerCase();
-            if (text) matchQuestionsText.push(text);
-        }
-
-        for (const row of await this.feedbackTable.locator("tr").all()) {
-            const cells = await row.locator("td").all();
-            // skips header row because it has no td cells
-            if (!cells.length) continue;
-
-            for (const [colIndex, cell] of cells.entries()) {
-                const matchQuestionId = await this.getOptionId(cell);
-                const correctAnswer = correctAnswers[colIndex];
-
-                const matchQuestionIndex = matchQuestionsText.indexOf(matchQuestionId || "");
-                if (!matchQuestionId || !correctAnswer || matchQuestionIndex < 0) continue;
-
-                answersMap.set(matchQuestionIndex.toString(), correctAnswer);
-            }
-        }
-
-        return answersMap;
-    }
-
-    async extractCorrectAnswer(): Promise<AnswerObj | null> {
-        const questionId = await ExamHelper.getUniqueQuestionId(this.question);
-        if (!questionId) return null;
-
-        const hasFeedbackTable = (await this.feedbackTable.count()) > 0;
-
-        const ans: AnswerObj = {
-            questionId: questionId,
-            type: QuestionType.DROPDOWN_MATCH,
-            answer: hasFeedbackTable
-                ? await this.extractAnswerFromFeedbackTable()
-                : await this.extractAnswerFromSelectedOptions(),
-        };
-
-        if (ans.answer.size === 0) return null;
-        return ans;
-    }
-
-    private async justAnswerIt() {
-        for (const dropdown of await this.matchingQuestions) {
-            await jsClick(this.getDropdownButton(dropdown));
-
-            const firstOption = this.dropdownOptions(dropdown).first();
-            await jsClick(firstOption);
-        }
-    }
-
-    async guessAnswer(testFn: BruteForceTestFn, resetFn: BruteForceResetFn) {
-        await this.justAnswerIt();
-        if (await testFn()) return;
-
-        const showCorrectBtn = this.question.locator("button.show-answer-on-submit");
-        if (!(await showCorrectBtn.count())) return;
-
-        await forceClick(showCorrectBtn);
-        await sleep(100);
-
-        const correctAnswer = await this.extractCorrectAnswer();
-        console.log("Correct answer extracted:", correctAnswer?.answer);
-        if (!correctAnswer) return;
-
-        await resetFn();
-        await this.answer(correctAnswer);
-
-        await testFn();
     }
 }
