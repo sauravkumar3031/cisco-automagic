@@ -41,6 +41,6 @@ export class HotgridActivity extends ActivityBase {
 
         await this.activityHelper.closeNotifyPopup();
 
-        console.log("Completed hotgrid activity...");
+        console.log("Completed hotgrid activity.");
     }
 }

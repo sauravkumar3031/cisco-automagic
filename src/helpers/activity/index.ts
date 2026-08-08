@@ -12,7 +12,9 @@ import { FlipcardActivity } from "./flip-card";
 import { HotgridActivity } from "./hotgrid";
 import { MultiQuestionAssessment_Activity } from "./mcq-assessment";
 import { NarrativeActivity } from "./narrative";
+import { OpenTextInputActivity } from "./open-textinput";
 import { SingleQuestionSectionQuiz_Activity } from "./section-quiz";
+import { SentenceSequenceActivity } from "./sentence-sequence";
 import { VideoPlayerActivity } from "./video-player";
 
 export const ASSESSMENT_ANSWERS = new Map<string, AnswerObj>();
@@ -60,11 +62,18 @@ export class ActivityHelper {
             NarrativeActivity,
             FlipcardActivity,
             HotgridActivity,
+            SentenceSequenceActivity,
+            OpenTextInputActivity,
         ];
 
         for (const ActivityType of ActivityTypes) {
             if (await ActivityType.isInside(this.section)) {
-                await new ActivityType(this, this.section).doActivity();
+                try {
+                    await new ActivityType(this, this.section).doActivity();
+                } catch (e) {
+                    console.error(`${ActivityType.name}: Error during execution!`);
+                    console.error(e);
+                }
             }
         }
     }
