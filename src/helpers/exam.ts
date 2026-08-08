@@ -7,8 +7,6 @@ import {
     type AnswerObj,
     type BruteForceResetFn,
     type BruteForceTestFn,
-    type NextQues_Response,
-    type QuestionComponentResponse,
     QuestionType,
 } from "~/types";
 import { combinations } from "~/utils";
@@ -16,7 +14,6 @@ import { waitForUserIntervention } from "~/utils/prompt";
 import { MatchingActivity_Helper } from "./activity/matching-assessment";
 
 const ANSWERS = new Map<string, AnswerObj>();
-const listeningForAnswers = false;
 
 export class ExamHelper {
     utils: BotUtilities;
@@ -285,7 +282,7 @@ export class ExamHelper {
             }
 
             if (questionId === prevQuestionId) {
-                await sleep(500);
+                await sleep(150);
 
                 const newLastQuestion = (await this.questionElements).pop();
                 const newQuestionId = newLastQuestion
