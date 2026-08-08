@@ -1,6 +1,5 @@
 import type { Locator } from "@playwright/test";
 import { sleep } from "bun";
-import type { ActivityHelper } from "~/helpers/activity";
 import type { BotUtilities } from "~/helpers/bot-utils";
 import { click, forceClick, jsClick } from "~/helpers/misc";
 import type { CiscoBot } from "~/main";
@@ -168,12 +167,18 @@ export class ExamHelper {
         return null;
     }
 
-    private async beginExam() {
+    private async beginExam(isRetry = false) {
         if (await this.skipQuestionButton.isVisible()) {
             console.log("Exam already started, skipping start button click.");
         } else {
             console.log("Starting exam...");
             await forceClick(this.examStartButton);
+            await sleep(250);
+        }
+
+        if (!isRetry && (await this.examStartButton.isVisible())) {
+            await sleep(1000);
+            await this.beginExam(true);
         }
     }
 
@@ -288,7 +293,8 @@ export class ExamHelper {
             }
 
             if (questionId === prevQuestionId) {
-                await this.utils.waitForLoadersToDisappear(1);
+                isFinalTest ? await this.utils.waitForLoadersToDisappear(1) : await sleep(500);
+
                 const newLastQuestion = (await this.questionElements).pop();
                 const newQuestionId = newLastQuestion
                     ? await ExamHelper.getUniqueQuestionId(newLastQuestion)
