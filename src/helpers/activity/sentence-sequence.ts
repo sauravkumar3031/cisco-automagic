@@ -1,6 +1,6 @@
 import type { Locator } from "@playwright/test";
 import { sleep } from "bun";
-import { jsClick } from "../misc";
+import { jsClick, scrollIntoView } from "~/helpers/misc";
 import { ActivityBase } from "./base";
 
 export class SentenceSequenceActivity extends ActivityBase {
@@ -24,26 +24,51 @@ export class SentenceSequenceActivity extends ActivityBase {
         return this.sequenceWidget.locator("buttons-view button[aria-label*='submit']");
     }
 
+    private get showAnswerBtn() {
+        return this.sequenceWidget.locator("buttons-view button.show-answer-on-submit");
+    }
+
     private async getItemId(item: Locator) {
         return await item.getAttribute("data-itemid");
     }
 
     private async updatePosition(item: Locator, position: number) {
         const changePosBtn = item.locator(".stacker__item-state button");
-        if ((await changePosBtn.getAttribute("aria-expanded")) !== "true") {
-            await jsClick(changePosBtn);
-        }
+        await jsClick(changePosBtn);
+        await sleep(100);
 
         const dropDownStrip = item.locator(".stacker__item-state .dropdownstrip");
         const targetOption = dropDownStrip.locator(`button[data-target='${position}']`);
 
+        if (!(await targetOption.count())) return; // when the item is already on the same position
         await jsClick(targetOption);
     }
 
-    private async getCorrectPositions(useIndex = false) {
-        // data-itemid -> position (range: [1, itemsLen])
-        const correctPositions = new Map<string, number>();
+    private async solveSequence(answers: Map<number, string>) {
+        const items = await this.sequenceItems;
 
+        for (let i = items.length; i > 0; i--) {
+            const targetItem = answers.get(i);
+            const item = this.sequenceWidget.locator(
+                `ul li.sentenceSequence[data-itemid='${targetItem}']`,
+            );
+
+            await this.updatePosition(item, i);
+            await sleep(2000);
+        }
+
+        await jsClick(this.submitBtn);
+        await sleep(100);
+    }
+
+    private async getCorrectPositions() {
+        await jsClick(this.submitBtn);
+        await sleep(100);
+        await jsClick(this.showAnswerBtn);
+        await sleep(100);
+
+        // data-itemid -> position (range: [1, itemsLen])
+        const correctPositions = new Map<number, string>();
         const items = await this.sequenceItems;
 
         for (let i = 0; i < items.length; i++) {
@@ -53,40 +78,23 @@ export class SentenceSequenceActivity extends ActivityBase {
             const itemId = await this.getItemId(item);
             if (!itemId) continue;
 
-            const itemIdInt = useIndex ? i + 1 : Number.parseInt(itemId ?? "_", 10);
-            correctPositions.set(itemId, itemIdInt);
+            correctPositions.set(i + 1, itemId);
         }
 
+        await jsClick(this.resetBtn);
         return correctPositions;
     }
 
     async doActivity() {
         console.log("Doing Sentence Ordering Activity...");
+        await scrollIntoView(this.sequenceWidget);
 
         if (await this.resetBtn.count()) {
             await jsClick(this.resetBtn);
         }
 
-        const answer = await this.getCorrectPositions();
-        const items = await this.sequenceItems;
-
-        for (let i = 0; i < items.length; i++) {
-            const item = items[i];
-            if (!item) continue;
-
-            const id = await this.getItemId(item);
-            if (!id) break;
-
-            const correctPos = answer.get(id);
-            if (!correctPos) break;
-
-            console.log(`From ${i + 1} -> To ${correctPos}`);
-            await this.updatePosition(item, correctPos);
-            // updating the sequence has a fucking long transition during which the buttons are disabled
-            await sleep(2500);
-        }
-
-        await jsClick(this.submitBtn);
+        const answers = await this.getCorrectPositions();
+        await this.solveSequence(answers);
 
         console.log("Completed Sentence Ordering Activity.");
     }
